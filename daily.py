@@ -65,20 +65,28 @@ def get_upper_stocks():
 
     headers, rows = get_krx_data(today)
 
+    print("컬럼 목록:", headers)
+
+    def find_column(headers, keyword):
+        for i, col in enumerate(headers):
+            if keyword in col:
+                return i
+        return -1
+
     # 컬럼 위치 찾기
-    name_idx = headers.index("종목명")
-    price_idx = headers.index("종가")
-    change_rate_idx = headers.index("등락률")
-    value_idx = headers.index("거래대금")
-    foreign_idx = headers.index("외국인순매수수량")
-    inst_idx = headers.index("기관순매수수량")
+    name_idx = find_column(headers, "종목")
+    price_idx = find_column(headers, "종가")
+    change_rate_idx = find_column(headers, "등락")
+    value_idx = find_column(headers, "거래대금")
+    foreign_idx = find_column(headers, "외국인")
+    inst_idx = find_column(headers, "기관")
 
     stocks = []
 
     for row in rows:
-        change_rate = row[change_rate_idx].replace("%", "").strip()
-
         try:
+            change_rate = row[change_rate_idx].replace("%", "").strip()
+
             if float(change_rate) >= 29.9:
                 stocks.append({
                     "name": row[name_idx],
