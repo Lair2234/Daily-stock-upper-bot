@@ -112,6 +112,8 @@ def get_news(name):
 # 4️⃣ 메시지 조립
 # ==============================
 stocks = get_upper_stocks()
+print("상한가 종목 수:", len(stocks)
+      
 today = datetime.now().strftime("%Y-%m-%d")
 
 if not stocks:
