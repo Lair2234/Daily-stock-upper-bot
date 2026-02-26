@@ -1,7 +1,7 @@
 import os
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
+from bs4 import BeautifulSoup
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -9,140 +9,139 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 if not TOKEN or not CHAT_ID:
     raise Exception("텔레그램 환경변수 없음")
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/121.0.0.0 Safari/537.36",
-    "Referer": "https://finance.naver.com/",
-    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Connection": "keep-alive"
-}
+# 세션 생성
 session = requests.Session()
-session.headers.update(HEADERS)
+session.headers.update({
+    "User-Agent": "Mozilla/5.0",
+    "Referer": "http://data.krx.co.kr/"
+})
 
 # ==============================
-# 1️⃣ 상한가 목록 가져오기
+# 1️⃣ KRX OTP 생성
+# ==============================
+def generate_otp(today):
+    otp_url = "http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
+
+    data = {
+        "mktId": "ALL",
+        "trdDd": today,
+        "money": "1",
+        "csvxls_isNo": "false",
+        "name": "fileDown",
+        "url": "dbms/MDC/STAT/standard/MDCSTAT01501"
+    }
+
+    res = session.post(otp_url, data=data)
+    return res.text.strip()
+
+
+# ==============================
+# 2️⃣ KRX 데이터 다운로드
+# ==============================
+def get_krx_data(today):
+    otp = generate_otp(today)
+
+    download_url = "http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
+
+    res = session.post(download_url, data={"code": otp})
+
+    if res.status_code != 200:
+        raise Exception("KRX 다운로드 실패")
+
+    decoded = res.content.decode("euc-kr")
+    lines = decoded.split("\n")
+
+    headers = lines[0].split(",")
+    rows = [line.split(",") for line in lines[1:] if line]
+
+    return headers, rows
+
+
+# ==============================
+# 3️⃣ 상한가 필터링
 # ==============================
 def get_upper_stocks():
-    url = "https://finance.naver.com/sise/sise_upper.naver"
+    today = datetime.now().strftime("%Y%m%d")
 
-    res = session.get(url)
-    if res.status_code != 200:
-        raise Exception("상한가 페이지 요청 실패")
+    headers, rows = get_krx_data(today)
 
-    soup = BeautifulSoup(res.text, "html.parser")
+    # 컬럼 위치 찾기
+    name_idx = headers.index("종목명")
+    price_idx = headers.index("종가")
+    change_rate_idx = headers.index("등락률")
+    value_idx = headers.index("거래대금")
+    foreign_idx = headers.index("외국인순매수수량")
+    inst_idx = headers.index("기관순매수수량")
 
     stocks = []
 
-    rows = soup.select("table.type_2 tr")
-
     for row in rows:
-        cols = row.find_all("td")
-        if len(cols) < 7:
+        change_rate = row[change_rate_idx].replace("%", "").strip()
+
+        try:
+            if float(change_rate) >= 29.9:
+                stocks.append({
+                    "name": row[name_idx],
+                    "price": row[price_idx],
+                    "value": row[value_idx],
+                    "foreign": row[foreign_idx],
+                    "institution": row[inst_idx]
+                })
+        except:
             continue
-
-        name_tag = cols[1].find("a")
-        if not name_tag:
-            continue
-
-        name = name_tag.text.strip()
-        code = name_tag["href"].split("=")[-1]
-        price = cols[2].text.strip()
-
-        stocks.append({
-            "name": name,
-            "code": code,
-            "price": price
-        })
 
     return stocks
-    
-
-# ==============================
-# 2️⃣ 거래대금 + 수급 정보
-# ==============================
-def get_stock_detail(code):
-    url = f"https://finance.naver.com/item/main.naver?code={code}"
-    res = requests.get(url, headers=HEADERS)
-    soup = BeautifulSoup(res.text, "html.parser")
-
-    # 거래대금
-    value = soup.select_one("table.no_info td span")
-    trading_value = value.text.strip() if value else "확인불가"
-
-    # 외인/기관/프로그램 (간단 버전)
-    investor_table = soup.select("table.tb_type1 tr")
-
-    foreign = "확인불가"
-    institution = "확인불가"
-
-    for row in investor_table:
-        th = row.find("th")
-        if th:
-            title = th.text.strip()
-            if "외국인" in title:
-                foreign = row.find_all("td")[-1].text.strip()
-            if "기관" in title:
-                institution = row.find_all("td")[-1].text.strip()
-
-    return trading_value, foreign, institution
 
 
 # ==============================
-# 3️⃣ 뉴스 3개 가져오기
+# 4️⃣ 뉴스 가져오기
 # ==============================
 def get_news(name):
-    search_url = f"https://search.naver.com/search.naver?where=news&query={name}"
-    res = session.get(search_url)
+    url = f"https://search.naver.com/search.naver?where=news&query={name}"
+
+    res = session.get(url)
     soup = BeautifulSoup(res.text, "html.parser")
 
     titles = soup.select("a.news_tit")[:3]
 
-    news_list = []
-
-    for t in titles:
-        title = t.text.strip()
-        news_list.append(title)
-
-    return news_list
+    return [t.text.strip() for t in titles]
 
 
 # ==============================
-# 4️⃣ 메시지 조립
+# 5️⃣ 메시지 조립
 # ==============================
 stocks = get_upper_stocks()
+today_msg = datetime.now().strftime("%Y-%m-%d")
+
 print("상한가 종목 수:", len(stocks))
-      
-today = datetime.now().strftime("%Y-%m-%d")
 
 if not stocks:
-    message = f"[{today}] 오늘 상한가 종목 없음"
+    message = f"[{today_msg}] 오늘 상한가 종목 없음"
 else:
     message_lines = []
 
-    for stock in stocks:
-        trading_value, foreign, institution = get_stock_detail(stock["code"])
-        news_list = get_news(stock["name"])
+    for s in stocks:
+        news_list = get_news(s["name"])
 
-        stock_block = (
-            f"{stock['name']} ({stock['price']})\n"
-            f"- 거래대금: {trading_value}\n"
-            f"- 외인: {foreign}\n"
-            f"- 기관: {institution}\n"
+        block = (
+            f"📈 {s['name']} ({s['price']})\n"
+            f"- 거래대금: {s['value']}\n"
+            f"- 외인 순매수: {s['foreign']}\n"
+            f"- 기관 순매수: {s['institution']}\n"
         )
+
         if news_list:
-            stock_block += "\n최근 뉴스:\n"
+            block += "\n최근 뉴스:\n"
             for n in news_list:
-                stock_block += f"- {n}\n"
+                block += f"- {n}\n"
 
-        message_lines.append(stock_block)
+        message_lines.append(block)
 
-    message = f"[{today}] 오늘의 상한가 종목\n\n" + "\n\n".join(message_lines)
+    message = f"[{today_msg}] 오늘의 상한가 종목\n\n" + "\n\n".join(message_lines)
 
 
 # ==============================
-# 텔레그램 전송
+# 6️⃣ 텔레그램 전송
 # ==============================
 telegram_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
