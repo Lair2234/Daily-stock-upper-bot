@@ -22,9 +22,12 @@ headers = {
 
 res = requests.get(url, headers=headers)
 
+print("status:", res.status_code)
+print("response:", res.text[:500])
+
 if res.status_code != 200:
     raise Exception("네이버 API 실패")
-
+    
 data = res.json()
 
 stocks = []
