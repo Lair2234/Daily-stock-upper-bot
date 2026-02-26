@@ -84,7 +84,7 @@ def get_stock_detail(code):
                 institution = row.find_all("td")[-1].text.strip()
 
     return trading_value, foreign, institution
-    
+
 
 # ==============================
 # 3️⃣ 뉴스 3개 가져오기
