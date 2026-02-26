@@ -24,16 +24,20 @@ def get_upper_stocks():
         raise Exception("상한가 페이지 요청 실패")
 
     soup = BeautifulSoup(res.text, "html.parser")
-    rows = soup.select("table.type_2 tr")
 
     stocks = []
 
-    for row in rows:
+    # 종목 링크 기준으로 추출 (가장 안전)
+    links = soup.select("table.type_2 a.tltle")
+
+    for link in links:
+        name = link.text.strip()
+        code = link["href"].split("=")[-1]
+
+        row = link.find_parent("tr")
         cols = row.find_all("td")
-        if len(cols) > 1:
-            link = cols[1].find("a")
-            name = link.text.strip()
-            code = link["href"].split("=")[-1]
+
+        if len(cols) >= 3:
             price = cols[2].text.strip()
 
             stocks.append({
