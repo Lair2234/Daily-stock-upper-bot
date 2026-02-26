@@ -15,8 +15,9 @@ if not CHAT_ID:
 url = "https://m.stock.naver.com/api/sise/siseUpperLimit"
 
 headers = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json",
+    "Referer": "https://m.stock.naver.com/"
 }
 
 res = requests.get(url, headers=headers)
