@@ -4,8 +4,8 @@ import telegram
 import os
 
 # 텔레그램 정보 (GitHub Secrets에서 가져옴)
-TOKEN = os.environ['TELEGRAM_TOKEN']
-CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
+TOKEN = os.environ['8446915676:AAExeLkEO92P3L8D57Kv-cSe_AhMP_tNq9c']
+CHAT_ID = os.environ['7529192361']
 
 bot = telegram.Bot(token=TOKEN)
 
