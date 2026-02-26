@@ -1,56 +1,30 @@
 import os
 import requests
-from datetime import datetime
+import csv
+from io import StringIO
+from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 
+# ==============================
+# 텔레그램 설정
+# ==============================
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
     raise Exception("텔레그램 환경변수 없음")
 
+# ==============================
 # 세션 생성
+# ==============================
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0",
-    "Referer": "https://data.krx.co.kr/",
-    "Origin": "https://data.krx.co.kr"
 })
 
 # ==============================
-# 1️⃣ KRX OTP 생성
+# 1️⃣ OTP 생성
 # ==============================
-def generate_otp(today):
-    otp_url = "https://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
-
-    data = {
-        "mktId": "ALL",
-        "trdDd": today,
-        "share": "1",
-        "money": "1",
-        "csvxls_isNo": "false",
-        "name": "fileDown",
-        "url": "dbms/MDC/STAT/standard/MDCSTAT01501"
-    }
-
-    res = session.post(
-        otp_url,
-        data=data,
-        headers={
-            "Referer": "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader",
-            "User-Agent": "Mozilla/5.0"
-        }
-    )
-
-    return res.text.strip()
-
-
-# ==============================
-# 2️⃣ KRX 데이터 다운로드
-# ==============================
-import csv
-from io import StringIO
-
 def generate_otp(today):
     otp_url = "https://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
 
@@ -68,32 +42,67 @@ def generate_otp(today):
         data=data,
         headers={
             "Referer": "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader",
-            "User-Agent": "Mozilla/5.0"
+            "Origin": "https://data.krx.co.kr"
         }
     )
 
     return res.text.strip()
 
+
 # ==============================
-# 3️⃣ 상한가 필터링
+# 2️⃣ KRX 데이터 다운로드
 # ==============================
+def get_krx_data(today):
+    otp = generate_otp(today)
+
+    download_url = "https://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
+
+    res = session.post(
+        download_url,
+        data={"code": otp},
+        headers={
+            "Referer": "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader",
+            "Origin": "https://data.krx.co.kr"
+        }
+    )
+
+    if res.status_code != 200:
+        raise Exception("KRX 다운로드 실패")
+
+    decoded = res.content.decode("euc-kr")
+
+    f = StringIO(decoded)
+    reader = csv.reader(f)
+    rows = list(reader)
+
+    headers = rows[0]
+    data_rows = rows[1:]
+
+    return headers, data_rows
+
+
+# ==============================
+# 3️⃣ 상한가 종목 필터
+# ==============================
+def find_column(headers, keyword):
+    for i, col in enumerate(headers):
+        if keyword in col:
+            return i
+    return -1
+
+
 def get_upper_stocks():
-    today = datetime.now().strftime("%Y%m%d")
+    # 한국시간 기준 당일
+    kst = timezone(timedelta(hours=9))
+    today = datetime.now(kst).strftime("%Y%m%d")
 
     headers, rows = get_krx_data(today)
 
     print("컬럼 목록:", headers)
 
-    def find_column(headers, keyword):
-        for i, col in enumerate(headers):
-            if keyword in col:
-                return i
-        return -1
-
-    # 컬럼 위치 찾기
-    name_idx = find_column(headers, "종목")
+    name_idx = find_column(headers, "종목명")
     price_idx = find_column(headers, "종가")
-    change_rate_idx = find_column(headers, "등락")
+    change_idx = find_column(headers, "등락률")
     value_idx = find_column(headers, "거래대금")
     foreign_idx = find_column(headers, "외국인")
     inst_idx = find_column(headers, "기관")
@@ -102,7 +111,7 @@ def get_upper_stocks():
 
     for row in rows:
         try:
-            change_rate = row[change_rate_idx].replace("%", "").strip()
+            change_rate = row[change_idx].replace("%", "").strip()
 
             if float(change_rate) >= 29.9:
                 stocks.append({
@@ -123,17 +132,16 @@ def get_upper_stocks():
 # ==============================
 def get_news(name):
     url = f"https://search.naver.com/search.naver?where=news&query={name}"
-
     res = session.get(url)
-    soup = BeautifulSoup(res.text, "html.parser")
 
+    soup = BeautifulSoup(res.text, "html.parser")
     titles = soup.select("a.news_tit")[:3]
 
     return [t.text.strip() for t in titles]
 
 
 # ==============================
-# 5️⃣ 메시지 조립
+# 5️⃣ 메시지 생성
 # ==============================
 stocks = get_upper_stocks()
 today_msg = datetime.now().strftime("%Y-%m-%d")
