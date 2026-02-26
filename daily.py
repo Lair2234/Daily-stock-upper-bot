@@ -48,24 +48,31 @@ def generate_otp(today):
 # ==============================
 # 2️⃣ KRX 데이터 다운로드
 # ==============================
-def get_krx_data(today):
-    otp = generate_otp(today)
+import csv
+from io import StringIO
 
-    download_url = "https://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
+def generate_otp(today):
+    otp_url = "https://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
 
-    res = session.post(download_url, data={"code": otp})
+    data = {
+        "searchType": "1",
+        "mktId": "ALL",
+        "trdDd": today,
+        "csvxls_isNo": "false",
+        "name": "fileDown",
+        "url": "dbms/MDC/STAT/standard/MDCSTAT03901"
+    }
 
-    if res.status_code != 200:
-        raise Exception("KRX 다운로드 실패")
+    res = session.post(
+        otp_url,
+        data=data,
+        headers={
+            "Referer": "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader",
+            "User-Agent": "Mozilla/5.0"
+        }
+    )
 
-    decoded = res.content.decode("euc-kr")
-    lines = decoded.split("\n")
-
-    headers = lines[0].split(",")
-    rows = [line.split(",") for line in lines[1:] if line]
-
-    return headers, rows
-
+    return res.text.strip()
 
 # ==============================
 # 3️⃣ 상한가 필터링
