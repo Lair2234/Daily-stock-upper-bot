@@ -1,8 +1,8 @@
 import requests
 import os
 
-TOKEN = os.environ.get("8446915676:AAExeLkEO92P3L8D57Kv-cSe_AhMP_tNq9c")
-CHAT_ID = os.environ.get("7529192361")
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # ====== 안전 확인 ======
 if not TOKEN:
