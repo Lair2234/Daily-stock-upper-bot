@@ -69,11 +69,17 @@ def get_krx_data(today):
     if res.status_code != 200:
         raise Exception("KRX 다운로드 실패")
 
+    if not res.content:
+        raise Exception("KRX 응답이 비어 있음 (아직 데이터 생성 안 됨)")
+
     decoded = res.content.decode("euc-kr")
 
     f = StringIO(decoded)
     reader = csv.reader(f)
     rows = list(reader)
+
+    if len(rows) == 0:
+        raise Exception("CSV 데이터가 비어 있음")
 
     headers = rows[0]
     data_rows = rows[1:]
