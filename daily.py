@@ -13,25 +13,35 @@ if not TOKEN or not CHAT_ID:
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0",
-    "Referer": "http://data.krx.co.kr/"
+    "Referer": "https://data.krx.co.kr/",
+    "Origin": "https://data.krx.co.kr"
 })
 
 # ==============================
 # 1️⃣ KRX OTP 생성
 # ==============================
 def generate_otp(today):
-    otp_url = "http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
+    otp_url = "https://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
 
     data = {
         "mktId": "ALL",
         "trdDd": today,
+        "share": "1",
         "money": "1",
         "csvxls_isNo": "false",
         "name": "fileDown",
         "url": "dbms/MDC/STAT/standard/MDCSTAT01501"
     }
 
-    res = session.post(otp_url, data=data)
+    res = session.post(
+        otp_url,
+        data=data,
+        headers={
+            "Referer": "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader",
+            "User-Agent": "Mozilla/5.0"
+        }
+    )
+
     return res.text.strip()
 
 
@@ -41,7 +51,7 @@ def generate_otp(today):
 def get_krx_data(today):
     otp = generate_otp(today)
 
-    download_url = "http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
+    download_url = "https://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
 
     res = session.post(download_url, data={"code": otp})
 
