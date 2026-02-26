@@ -10,7 +10,8 @@ if not TOKEN or not CHAT_ID:
     raise Exception("텔레그램 환경변수 없음")
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://finance.naver.com/",
 }
 
 # ==============================
@@ -18,8 +19,8 @@ HEADERS = {
 # ==============================
 def get_upper_stocks():
     url = "https://finance.naver.com/sise/sise_upper.naver"
-    res = requests.get(url, headers=HEADERS)
 
+    res = requests.get(url, headers=HEADERS)
     if res.status_code != 200:
         raise Exception("상한가 페이지 요청 실패")
 
@@ -27,24 +28,30 @@ def get_upper_stocks():
 
     stocks = []
 
-    # 종목 링크 기준으로 추출 (가장 안전)
-    links = soup.select("table.type_2 a.tltle")
+    table = soup.find("table", {"class": "type_2"})
+    if not table:
+        return stocks
 
-    for link in links:
-        name = link.text.strip()
-        code = link["href"].split("=")[-1]
+    rows = table.find("tbody").find_all("tr")
 
-        row = link.find_parent("tr")
+    for row in rows:
         cols = row.find_all("td")
+        if len(cols) < 3:
+            continue
 
-        if len(cols) >= 3:
-            price = cols[2].text.strip()
+        name_tag = cols[1].find("a")
+        if not name_tag:
+            continue
 
-            stocks.append({
-                "name": name,
-                "code": code,
-                "price": price
-            })
+        name = name_tag.text.strip()
+        code = name_tag["href"].split("=")[-1]
+        price = cols[2].text.strip()
+
+        stocks.append({
+            "name": name,
+            "code": code,
+            "price": price
+        })
 
     return stocks
 
