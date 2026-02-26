@@ -10,9 +10,16 @@ if not TOKEN or not CHAT_ID:
     raise Exception("텔레그램 환경변수 없음")
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/121.0.0.0 Safari/537.36",
     "Referer": "https://finance.naver.com/",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Connection": "keep-alive"
 }
+session = requests.Session()
+session.headers.update(HEADERS)
 
 # ==============================
 # 1️⃣ 상한가 목록 가져오기
@@ -20,7 +27,7 @@ HEADERS = {
 def get_upper_stocks():
     url = "https://finance.naver.com/sise/sise_upper.naver"
 
-    res = requests.get(url, headers=HEADERS)
+    res = session.get(url)
     if res.status_code != 200:
         raise Exception("상한가 페이지 요청 실패")
 
@@ -91,7 +98,7 @@ def get_stock_detail(code):
 # ==============================
 def get_news(name):
     search_url = f"https://search.naver.com/search.naver?where=news&query={name}"
-    res = requests.get(search_url, headers=HEADERS)
+    res = session.get(search_url)
     soup = BeautifulSoup(res.text, "html.parser")
 
     titles = soup.select("a.news_tit")[:3]
