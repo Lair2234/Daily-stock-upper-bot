@@ -59,32 +59,44 @@ def get_upper_stocks():
 # ==============================
 # 2️⃣ 거래대금 + 수급 정보
 # ==============================
-def get_stock_detail(code):
-    url = f"https://finance.naver.com/item/main.naver?code={code}"
-    res = requests.get(url, headers=HEADERS)
-    soup = BeautifulSoup(res.text, "html.parser")
+def get_upper_stocks():
+    url = "http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd"
 
-    # 거래대금
-    value = soup.select_one("table.no_info td span")
-    trading_value = value.text.strip() if value else "확인불가"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "http://data.krx.co.kr/"
+    }
 
-    # 외인/기관/프로그램 (간단 버전)
-    investor_table = soup.select("table.tb_type1 tr")
+    data = {
+        "bld": "dbms/MDC/STAT/standard/MDCSTAT01501",
+        "mktId": "ALL",
+        "trdDd": datetime.now().strftime("%Y%m%d"),
+        "share": "1",
+        "money": "1",
+        "csvxls_isNo": "false"
+    }
 
-    foreign = "확인불가"
-    institution = "확인불가"
+    res = requests.post(url, headers=headers, data=data)
 
-    for row in investor_table:
-        th = row.find("th")
-        if th:
-            title = th.text.strip()
-            if "외국인" in title:
-                foreign = row.find_all("td")[-1].text.strip()
-            if "기관" in title:
-                institution = row.find_all("td")[-1].text.strip()
+    if res.status_code != 200:
+        raise Exception("KRX 요청 실패")
 
-    return trading_value, foreign, institution
+    json_data = res.json()
+    stocks = []
 
+    if "OutBlock_1" not in json_data:
+        return stocks
+
+    for row in json_data["OutBlock_1"]:
+        if row["UPDN_RATE"] == "30.00":  # 상한가 기준
+            stocks.append({
+                "name": row["ISU_NM"],
+                "code": row["ISU_SRT_CD"],
+                "price": row["TDD_CLSPRC"]
+            })
+
+    return stocks
+    
 
 # ==============================
 # 3️⃣ 뉴스 3개 가져오기
