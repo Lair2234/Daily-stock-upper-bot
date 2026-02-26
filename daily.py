@@ -35,15 +35,11 @@ def get_upper_stocks():
 
     stocks = []
 
-    table = soup.find("table", {"class": "type_2"})
-    if not table:
-        return stocks
-
-    rows = table.find("tbody").find_all("tr")
+    rows = soup.select("table.type_2 tr")
 
     for row in rows:
         cols = row.find_all("td")
-        if len(cols) < 3:
+        if len(cols) < 7:
             continue
 
         name_tag = cols[1].find("a")
