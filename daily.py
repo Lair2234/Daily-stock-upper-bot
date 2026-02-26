@@ -112,7 +112,7 @@ def get_news(name):
 # 4️⃣ 메시지 조립
 # ==============================
 stocks = get_upper_stocks()
-print("상한가 종목 수:", len(stocks)
+print("상한가 종목 수:", len(stocks))
       
 today = datetime.now().strftime("%Y-%m-%d")
 
@@ -126,12 +126,11 @@ else:
         news_list = get_news(stock["name"])
 
         stock_block = (
-            f"📈 {stock['name']} ({stock['price']})\n"
-            f"• 거래대금: {trading_value}\n"
-            f"• 외인: {foreign}\n"
-            f"• 기관: {institution}\n"
+            f"{stock['name']} ({stock['price']})\n"
+            f"- 거래대금: {trading_value}\n"
+            f"- 외인: {foreign}\n"
+            f"- 기관: {institution}\n"
         )
-
         if news_list:
             stock_block += "\n최근 뉴스:\n"
             for n in news_list:
