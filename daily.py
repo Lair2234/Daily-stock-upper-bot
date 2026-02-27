@@ -24,7 +24,9 @@ def send_message(text):
 # ------------------ 최근 영업일 찾기 ------------------
 
 def get_recent_business_day():
-    today = datetime.today()
+
+    KST = timezone(timedelta(hours=9))
+    today = datetime.now(KST)
 
     for i in range(7):
         date = (today - timedelta(days=i)).strftime("%Y%m%d")
