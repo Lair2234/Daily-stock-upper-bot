@@ -3,7 +3,7 @@ import time
 import requests
 import pandas as pd
 from datetime import datetime
-from pykrx.stock import market
+from pykrx import stock
 from bs4 import BeautifulSoup
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
@@ -25,9 +25,9 @@ def send_message(text):
 
 def get_limitup_stocks():
     today = datetime.today().strftime("%Y%m%d")
-    df = market.get_market_ohlcv_by_ticker(today)
+    df = stock.get_market_ohlcv_by_ticker(today)
 
-    # 상한가 조건: 등락률 29% 이상 (KRX 기준 30%)
+    # 상한가 기준 (등락률 29% 이상)
     df = df[df["등락률"] >= 29]
 
     return today, df
@@ -35,23 +35,21 @@ def get_limitup_stocks():
 # ------------------ 거래대금 ------------------
 
 def get_trading_value(date):
-    df = market.get_market_trading_value_by_ticker(date)
-    return df
+    return stock.get_market_trading_value_by_ticker(date)
 
 # ------------------ 외국인/기관 ------------------
 
 def get_investor_flow(date):
-    df = market.get_market_trading_value_by_investor(date)
-    return df
+    return stock.get_market_trading_value_by_investor(date)
 
 # ------------------ KRX 테마 ------------------
 
 def build_theme_map():
     theme_map = {}
-    theme_list = market.get_theme_list()
+    theme_list = stock.get_theme_list()
 
     for theme_code, theme_name in theme_list.items():
-        tickers = market.get_theme_portfolio(theme_code)
+        tickers = stock.get_theme_portfolio(theme_code)
         for ticker in tickers:
             theme_map.setdefault(ticker, []).append(theme_name)
 
@@ -64,7 +62,7 @@ def get_latest_news(name):
     url = f"https://search.naver.com/search.naver?where=news&query={query}"
     headers = {"User-Agent": "Mozilla/5.0"}
 
-    html = requests.get(url, headers=headers).text
+    html = requests.get(url, headers=headers, timeout=10).text
     soup = BeautifulSoup(html, "html.parser")
 
     news = soup.select_one("a.news_tit")
@@ -93,7 +91,7 @@ def main():
 
     for ticker in limitup_df.index:
 
-        name = market.get_market_ticker_name(ticker)
+        name = stock.get_market_ticker_name(ticker)
         change = limitup_df.loc[ticker]["등락률"]
 
         # 거래대금
