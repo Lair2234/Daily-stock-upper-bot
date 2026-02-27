@@ -2,7 +2,7 @@ import os
 import time
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pykrx import stock
 from bs4 import BeautifulSoup
 
