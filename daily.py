@@ -1,145 +1,125 @@
+import os
+import time
 import requests
 import pandas as pd
-from io import BytesIO
-from datetime import datetime, timedelta
-import os
-import sys
+from datetime import datetime
+from pykrx.stock import market
+from bs4 import BeautifulSoup
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TOKEN = os.environ["TELEGRAM_TOKEN"]
+CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
-OTP_URL = "http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
-DOWN_URL = "http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
+# ------------------ 텔레그램 ------------------
 
-HEADERS = {
-    "Referer": "http://data.krx.co.kr/contents/MDC/MDI/mdiLoader",
-    "User-Agent": "Mozilla/5.0"
-}
-
-
-# ---------------------------
-# 텔레그램 전송
-# ---------------------------
-def send_telegram(message):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ 텔레그램 환경변수 누락")
-        return
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message
+def send_message(text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    data = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
     }
-    requests.post(url, data=payload)
+    requests.post(url, data=data)
 
+# ------------------ 상한가 종목 ------------------
 
-# ---------------------------
-# KRX 데이터 요청
-# ---------------------------
-def get_krx_data(date_str):
-    otp_data = {
-        "mktId": "ALL",
-        "trdDd": date_str,
-        "share": "1",
-        "money": "1",
-        "csvxls_isNo": "false",
-        "name": "fileDown",
-        "url": "dbms/MDC/STAT/standard/MDCSTAT03901"
-    }
+def get_limitup_stocks():
+    today = datetime.today().strftime("%Y%m%d")
+    df = market.get_market_ohlcv_by_ticker(today)
 
-    try:
-        otp_res = requests.post(OTP_URL, data=otp_data, headers=HEADERS, timeout=10)
+    # 상한가 조건: 등락률 29% 이상 (KRX 기준 30%)
+    df = df[df["등락률"] >= 29]
 
-        if otp_res.status_code != 200:
-            return None
+    return today, df
 
-        otp = otp_res.text.strip()
-        if not otp:
-            return None
+# ------------------ 거래대금 ------------------
 
-        down_res = requests.post(DOWN_URL, data={"code": otp}, headers=HEADERS, timeout=10)
+def get_trading_value(date):
+    df = market.get_market_trading_value_by_ticker(date)
+    return df
 
-        if down_res.status_code != 200:
-            return None
+# ------------------ 외국인/기관 ------------------
 
-        df = pd.read_csv(BytesIO(down_res.content), encoding="euc-kr")
+def get_investor_flow(date):
+    df = market.get_market_trading_value_by_investor(date)
+    return df
 
-        if df.empty:
-            return None
+# ------------------ KRX 테마 ------------------
 
-        return df
+def build_theme_map():
+    theme_map = {}
+    theme_list = market.get_theme_list()
 
-    except Exception as e:
-        print("KRX 요청 실패:", e)
-        return None
+    for theme_code, theme_name in theme_list.items():
+        tickers = market.get_theme_portfolio(theme_code)
+        for ticker in tickers:
+            theme_map.setdefault(ticker, []).append(theme_name)
 
+    return theme_map
 
-# ---------------------------
-# 최근 거래일 자동 탐색
-# ---------------------------
-def find_latest_trading_day():
-    today = datetime.now()
+# ------------------ 뉴스 크롤링 ------------------
 
-    for i in range(7):  # 최대 7일 탐색
-        target_date = today - timedelta(days=i)
-        date_str = target_date.strftime("%Y%m%d")
-        print(f"🔎 {date_str} 조회 시도")
+def get_latest_news(name):
+    query = f"{name} 상한가"
+    url = f"https://search.naver.com/search.naver?where=news&query={query}"
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-        df = get_krx_data(date_str)
+    html = requests.get(url, headers=headers).text
+    soup = BeautifulSoup(html, "html.parser")
 
-        if df is not None:
-            print(f"✅ 사용 날짜: {date_str}")
-            return df, date_str
+    news = soup.select_one("a.news_tit")
 
-    return None, None
+    if news:
+        title = news.text.strip()
+        link = news["href"]
+        return f"{title}\n{link}"
 
+    return "관련 뉴스 없음"
 
-# ---------------------------
-# 메인 실행
-# ---------------------------
+# ------------------ 메인 ------------------
+
 def main():
+    today, limitup_df = get_limitup_stocks()
 
-    df, used_date = find_latest_trading_day()
-
-    if df is None:
-        send_telegram("❌ 최근 7일 내 거래 데이터 없음")
+    if limitup_df.empty:
+        send_message("📭 오늘 상한가 종목 없음")
         return
 
-    # 컬럼 확인
-    if "등락률" not in df.columns:
-        send_telegram("❌ 등락률 컬럼 찾을 수 없음 (KRX 구조 변경 가능)")
-        return
+    trading_value_df = get_trading_value(today)
+    investor_df = get_investor_flow(today)
+    theme_map = build_theme_map()
 
-    # 등락률 숫자 변환 안전 처리
-    df["등락률"] = (
-        df["등락률"]
-        .astype(str)
-        .str.replace(",", "", regex=False)
-        .str.replace("%", "", regex=False)
-    )
+    message = f"📅 {today} 상한가 종목\n\n"
 
-    df["등락률"] = pd.to_numeric(df["등락률"], errors="coerce")
+    for ticker in limitup_df.index:
 
-    df = df.dropna(subset=["등락률"])
+        name = market.get_market_ticker_name(ticker)
+        change = limitup_df.loc[ticker]["등락률"]
 
-    # ETF/ETN 제거
-    df = df[~df["종목명"].str.contains("ETF|ETN", na=False)]
+        # 거래대금
+        trading_value = trading_value_df.loc[ticker]["거래대금"]
 
-    # 상위 10개 추출
-    top10 = df.sort_values("등락률", ascending=False).head(10)
+        # 외국인/기관 순매수
+        foreign = investor_df.loc["외국인", ticker]
+        institution = investor_df.loc["기관합계", ticker]
 
-    message = f"📊 KRX 상승률 TOP10 ({used_date})\n\n"
+        # 테마
+        themes = theme_map.get(ticker, ["테마없음"])
 
-    for i, row in enumerate(top10.itertuples(), 1):
-        message += f"{i}. {row.종목명} ({round(row.등락률,2)}%)\n"
+        # 뉴스
+        news = get_latest_news(name)
+        time.sleep(1)  # 네이버 차단 방지
 
-    # 텔레그램 글자수 제한 보호
-    if len(message) > 4000:
-        message = message[:3900] + "\n(이하 생략)"
+        message += f"📈 <b>{name} ({ticker})</b>\n"
+        message += f"등락률: {change:.2f}%\n"
+        message += f"🧠 테마: {', '.join(themes)}\n"
+        message += f"💰 거래대금: {trading_value:,}원\n"
+        message += f"🌍 외국인 순매수: {foreign:,}원\n"
+        message += f"🏢 기관 순매수: {institution:,}원\n"
+        message += f"📰 상승 이유:\n{news}\n"
+        message += "----------------------\n\n"
 
-    send_telegram(message)
-
-    print("✅ 전송 완료")
+    send_message(message)
 
 
 if __name__ == "__main__":
