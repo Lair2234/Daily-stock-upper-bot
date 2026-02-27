@@ -1,202 +1,146 @@
-import os
 import requests
-import csv
-from io import StringIO
-from datetime import datetime, timezone, timedelta
-from bs4 import BeautifulSoup
+import pandas as pd
+from io import BytesIO
+from datetime import datetime, timedelta
+import os
+import sys
 
-# ==============================
-# 텔레그램 설정
-# ==============================
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-if not TOKEN or not CHAT_ID:
-    raise Exception("텔레그램 환경변수 없음")
+OTP_URL = "http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
+DOWN_URL = "http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
 
-# ==============================
-# 세션
-# ==============================
-session = requests.Session()
-session.headers.update({
+HEADERS = {
+    "Referer": "http://data.krx.co.kr/contents/MDC/MDI/mdiLoader",
     "User-Agent": "Mozilla/5.0"
-})
+}
 
-# ==============================
-# 날짜 결정 (20시 이전이면 전날 데이터)
-# ==============================
-def get_target_date():
-    kst = timezone(timedelta(hours=9))
-    now = datetime.now(kst)
 
-    if now.hour < 20:
-        target = now - timedelta(days=1)
-    else:
-        target = now
+# ---------------------------
+# 텔레그램 전송
+# ---------------------------
+def send_telegram(message):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("❌ 텔레그램 환경변수 누락")
+        return
 
-    return target.strftime("%Y%m%d")
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message
+    }
+    requests.post(url, data=payload)
 
-# ==============================
-# OTP 생성
-# ==============================
-def generate_otp(today):
-    otp_url = "https://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
 
-    data = {
-        "searchType": "1",
+# ---------------------------
+# KRX 데이터 요청
+# ---------------------------
+def get_krx_data(date_str):
+    otp_data = {
         "mktId": "ALL",
-        "trdDd": today,
+        "trdDd": date_str,
+        "share": "1",
+        "money": "1",
         "csvxls_isNo": "false",
         "name": "fileDown",
         "url": "dbms/MDC/STAT/standard/MDCSTAT03901"
     }
 
-    res = session.post(
-        otp_url,
-        data=data,
-        headers={
-            "Referer": "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader",
-            "Origin": "https://data.krx.co.kr"
-        }
+    try:
+        otp_res = requests.post(OTP_URL, data=otp_data, headers=HEADERS, timeout=10)
+
+        if otp_res.status_code != 200:
+            return None
+
+        otp = otp_res.text.strip()
+        if not otp:
+            return None
+
+        down_res = requests.post(DOWN_URL, data={"code": otp}, headers=HEADERS, timeout=10)
+
+        if down_res.status_code != 200:
+            return None
+
+        df = pd.read_csv(BytesIO(down_res.content), encoding="euc-kr")
+
+        if df.empty:
+            return None
+
+        return df
+
+    except Exception as e:
+        print("KRX 요청 실패:", e)
+        return None
+
+
+# ---------------------------
+# 최근 거래일 자동 탐색
+# ---------------------------
+def find_latest_trading_day():
+    today = datetime.now()
+
+    for i in range(7):  # 최대 7일 탐색
+        target_date = today - timedelta(days=i)
+        date_str = target_date.strftime("%Y%m%d")
+        print(f"🔎 {date_str} 조회 시도")
+
+        df = get_krx_data(date_str)
+
+        if df is not None:
+            print(f"✅ 사용 날짜: {date_str}")
+            return df, date_str
+
+    return None, None
+
+
+# ---------------------------
+# 메인 실행
+# ---------------------------
+def main():
+
+    df, used_date = find_latest_trading_day()
+
+    if df is None:
+        send_telegram("❌ 최근 7일 내 거래 데이터 없음")
+        return
+
+    # 컬럼 확인
+    if "등락률" not in df.columns:
+        send_telegram("❌ 등락률 컬럼 찾을 수 없음 (KRX 구조 변경 가능)")
+        return
+
+    # 등락률 숫자 변환 안전 처리
+    df["등락률"] = (
+        df["등락률"]
+        .astype(str)
+        .str.replace(",", "", regex=False)
+        .str.replace("%", "", regex=False)
     )
 
-    return res.text.strip()
+    df["등락률"] = pd.to_numeric(df["등락률"], errors="coerce")
 
-# ==============================
-# KRX 데이터 다운로드
-# ==============================
-def get_krx_data(today):
-    otp = generate_otp(today)
+    df = df.dropna(subset=["등락률"])
 
-    download_url = "https://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
+    # ETF/ETN 제거
+    df = df[~df["종목명"].str.contains("ETF|ETN", na=False)]
 
-    res = session.post(
-        download_url,
-        data={"code": otp},
-        headers={
-            "Referer": "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader",
-            "Origin": "https://data.krx.co.kr"
-        }
-    )
+    # 상위 10개 추출
+    top10 = df.sort_values("등락률", ascending=False).head(10)
 
-    if res.status_code != 200:
-        raise Exception("KRX 다운로드 실패")
+    message = f"📊 KRX 상승률 TOP10 ({used_date})\n\n"
 
-    if not res.content:
-        raise Exception("KRX 응답이 비어 있음 (아직 데이터 생성 안 됨)")
+    for i, row in enumerate(top10.itertuples(), 1):
+        message += f"{i}. {row.종목명} ({round(row.등락률,2)}%)\n"
 
-    decoded = res.content.decode("euc-kr")
+    # 텔레그램 글자수 제한 보호
+    if len(message) > 4000:
+        message = message[:3900] + "\n(이하 생략)"
 
-    f = StringIO(decoded)
-    reader = csv.reader(f)
-    rows = list(reader)
+    send_telegram(message)
 
-    if len(rows) < 2:
-        raise Exception("CSV 데이터가 비어 있음")
+    print("✅ 전송 완료")
 
-    headers = rows[0]
-    data_rows = rows[1:]
 
-    return headers, data_rows
-
-# ==============================
-# 컬럼 찾기
-# ==============================
-def find_column(headers, keyword):
-    for i, col in enumerate(headers):
-        if keyword in col:
-            return i
-    return -1
-
-# ==============================
-# 상한가 종목 추출
-# ==============================
-def get_upper_stocks():
-    today = get_target_date()
-    headers, rows = get_krx_data(today)
-
-    name_idx = find_column(headers, "종목명")
-    price_idx = find_column(headers, "종가")
-    change_idx = find_column(headers, "등락률")
-    value_idx = find_column(headers, "거래대금")
-    foreign_idx = find_column(headers, "외국인")
-    inst_idx = find_column(headers, "기관")
-
-    stocks = []
-
-    for row in rows:
-        try:
-            change_rate = row[change_idx].replace("%", "").strip()
-
-            if float(change_rate) >= 29.9:
-                stocks.append({
-                    "name": row[name_idx],
-                    "price": row[price_idx],
-                    "value": row[value_idx],
-                    "foreign": row[foreign_idx],
-                    "institution": row[inst_idx]
-                })
-        except:
-            continue
-
-    return stocks, today
-
-# ==============================
-# 뉴스 3개 가져오기
-# ==============================
-def get_news(name):
-    url = f"https://search.naver.com/search.naver?where=news&query={name}"
-    res = session.get(url)
-    soup = BeautifulSoup(res.text, "html.parser")
-    titles = soup.select("a.news_tit")[:3]
-    return [t.text.strip() for t in titles]
-
-# ==============================
-# 실행부
-# ==============================
-try:
-    stocks, target_date = get_upper_stocks()
-
-    today_msg = datetime.now().strftime("%Y-%m-%d")
-
-    if not stocks:
-        message = f"[{today_msg}] ({target_date}) 상한가 종목 없음"
-    else:
-        message_lines = []
-
-        for s in stocks:
-            news_list = get_news(s["name"])
-
-            block = (
-                f"📈 {s['name']} ({s['price']})\n"
-                f"- 거래대금: {s['value']}\n"
-                f"- 외인 순매수: {s['foreign']}\n"
-                f"- 기관 순매수: {s['institution']}\n"
-            )
-
-            if news_list:
-                block += "\n최근 뉴스:\n"
-                for n in news_list:
-                    block += f"- {n}\n"
-
-            message_lines.append(block)
-
-        message = f"[{today_msg}] ({target_date}) 상한가 종목\n\n" + "\n\n".join(message_lines)
-
-except Exception as e:
-    message = f"KRX 데이터 수집 실패\n{e}"
-
-# ==============================
-# 텔레그램 전송
-# ==============================
-telegram_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-
-requests.post(
-    telegram_url,
-    data={
-        "chat_id": CHAT_ID,
-        "text": message
-    }
-)
-
-print("전송 완료")
+if __name__ == "__main__":
+    main()
