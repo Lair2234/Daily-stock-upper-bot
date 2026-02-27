@@ -1,4 +1,4 @@
-name: Daily Limitup Bot
+name: Daily-stock-upper-bot Bot
 
 on:
   schedule:
